@@ -12,6 +12,11 @@ import sys
 import struct
 from contextlib import contextmanager
 
+try:
+    from boltons.setutils import IndexedSet
+except ImportError:
+    from .._vendor.boltons.setutils import IndexedSet
+
 from .constants import (
     APP_NAME,
     ChannelPriority,
@@ -39,7 +44,6 @@ from ..deprecations import deprecated
 from .._vendor.appdirs import user_data_dir
 from ..auxlib.decorators import memoizedproperty
 from ..auxlib.ish import dals
-from .._vendor.boltons.setutils import IndexedSet
 from .._vendor.frozendict import frozendict
 from ..common.compat import NoneType, on_win
 from ..common.configuration import (Configuration, ConfigurationLoadError, MapParameter,
@@ -78,6 +82,7 @@ non_x86_machines = {
     'arm64',
     'ppc64',
     'ppc64le',
+    'riscv64',
     's390x',
 }
 _arch_names = {
@@ -324,6 +329,7 @@ class Context(Configuration):
     number_channel_notices = ParameterLoader(PrimitiveParameter(5, element_type=int))
     _verbosity = ParameterLoader(
         PrimitiveParameter(0, element_type=int), aliases=('verbose', 'verbosity'))
+    experimental = ParameterLoader(SequenceParameter(PrimitiveParameter("", str)))
 
     # ######################################################
     # ##               Solver Configuration               ##
@@ -634,10 +640,14 @@ class Context(Configuration):
         return abspath(sys.prefix)
 
     @property
-    # This is deprecated, please use conda_exe_vars_dict instead.
+    @deprecated(
+        "23.9",
+        "24.3",
+        addendum="Please use `conda.base.context.context.conda_exe_vars_dict` instead",
+    )
     def conda_exe(self):
-        bin_dir = 'Scripts' if on_win else 'bin'
-        exe = 'conda.exe' if on_win else 'conda'
+        bin_dir = "Scripts" if on_win else "bin"
+        exe = "conda.exe" if on_win else "conda"
         return join(self.conda_prefix, bin_dir, exe)
 
     @property
@@ -796,18 +806,11 @@ class Context(Configuration):
 
     @property
     def use_only_tar_bz2(self):
-        from ..models.version import VersionOrder
         # we avoid importing this at the top to avoid PATH issues.  Ensure that this
         #    is only called when use_only_tar_bz2 is first called.
         import conda_package_handling.api
         use_only_tar_bz2 = False
         if self._use_only_tar_bz2 is None:
-            try:
-                import conda_build
-                use_only_tar_bz2 = VersionOrder(conda_build.__version__) < VersionOrder("3.18.3")
-
-            except ImportError:
-                pass
             if self._argparse_args and 'use_only_tar_bz2' in self._argparse_args:
                 use_only_tar_bz2 &= self._argparse_args['use_only_tar_bz2']
         return ((hasattr(conda_package_handling.api, 'libarchive_enabled') and
@@ -963,6 +966,7 @@ class Context(Configuration):
                 "use_only_tar_bz2",
                 "repodata_threads",
                 "fetch_threads",
+                "experimental",
             ),
             "Basic Conda Configuration": (  # TODO: Is there a better category name here?
                 "envs_dirs",
@@ -1606,6 +1610,11 @@ class Context(Configuration):
                 Sets the number of channel notices to be displayed when running commands
                 the "install", "create", "update", "env create", and "env update" . Defaults
                 to 5. In order to completely suppress channel notices, set this to 0.
+                """
+            ),
+            experimental=dals(
+                """
+                List of experimental features to enable.
                 """
             ),
         )
